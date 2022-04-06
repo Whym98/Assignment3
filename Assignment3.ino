@@ -11,11 +11,13 @@ const byte TASK3 = 19;
 volatile int count = 1; //global variables
 volatile int avecount = 0;
 volatile int POTval[4] = {1, 1, 1, 1};
-volatile int POTvalave = 1;
-volatile byte BUTTONSTATE = 0;
 volatile byte error_code = 0;
-volatile int SIGFREQ = 0;
 #define configTICK_RATE_HZ 500
+struct SerialVals{byte Button; int SignalFrequency; int POTAverage;};
+SerialVals Vals = {1 , 1 , 1};
+SemaphoreHandle_t ValsSemaphore;
+SemaphoreHandle_t POTSemaphore;
+xQueueHandle  xQueue;
 
 void setup() 
 {
@@ -27,15 +29,18 @@ void setup()
   pinMode(ERROR, OUTPUT);
   pinMode(SIG, INPUT);
   pinMode(TASK3, OUTPUT);
+  ValsSemaphore = xSemaphoreCreateBinary();
+  POTSemaphore = xSemaphoreCreateBinary();
+  xQueue = xQueueCreate( 1, sizeof(int) );
   xTaskCreate(&RUNWATCHDOG, "RUNWATCHDOG", 512,NULL,5,NULL ); //task 1
   xTaskCreate(&BUTTONREAD, "BUTTONREAD", 512,NULL,5,NULL ); //task 2
   xTaskCreate(&SIGREAD, "SIGREAD", 512,NULL,5,NULL ); //task 3
   xTaskCreate(&ADC, "ADC", 512,NULL,5,NULL ); //task 4
-  xTaskCreate(&ADCAVE, "ADCAVE", 4096,NULL,5,NULL ); //task 5
-  xTaskCreate(&ASM, "ASM", 4096,NULL,5,NULL ); //task 6
-  xTaskCreate(&ERRORCALC, "ERRORCALC", 4096,NULL,5,NULL ); //task 7
-  xTaskCreate(&ERRORLED, "ERRORLED", 4096,NULL,5,NULL ); //task 8
-  xTaskCreate(&SERIALPRINT, "SERIALPRINT", 4096,NULL,5,NULL ); //task 9
+  xTaskCreate(&ADCAVE, "ADCAVE", 512,NULL,5,NULL ); //task 5
+  xTaskCreate(&ASM, "ASM", 512,NULL,5,NULL ); //task 6
+  xTaskCreate(&ERRORCALC, "ERRORCALC", 512,NULL,5,NULL ); //task 7
+  xTaskCreate(&ERRORLED, "ERRORLED", 512,NULL,5,NULL ); //task 8
+  xTaskCreate(&SERIALPRINT, "SERIALPRINT", 1024,NULL,5,NULL ); //task 9
 }
 
 /*
@@ -110,13 +115,18 @@ void ADCAVE(void *pvParameter)
 {
   while(1)
   {
+    int SendVal;
+    xQueueSend( xQueue, &SendVal, portMAX_DELAY );
+    xSemaphoreTake( ValsSemaphore, portMAX_DELAY );
     int loop;
     int TOT = 0;
     for(loop = 0; loop < 4; loop++) //add up last 4 readings
     {
         TOT = TOT + POTval[loop];
     }
-    POTvalave = TOT / 4; //find average of readings and save to global variable 
+    Vals.POTAverage = TOT / 4; //find average of readings and save to global variable 
+    xQueueOverwrite(xQueue, &SendVal);
+    xSemaphoreGive( ValsSemaphore);
     vTaskDelay(21);
   }
 } 
@@ -125,7 +135,9 @@ void BUTTONREAD(void *pvParameter)
 {
   while(1)
   {
-    BUTTONSTATE = !digitalRead(BUTTON); //read button
+    xSemaphoreTake( ValsSemaphore, portMAX_DELAY );
+    Vals.Button = !digitalRead(BUTTON); //read button
+    xSemaphoreGive( ValsSemaphore);
     vTaskDelay(100);
   }
 }
@@ -147,14 +159,16 @@ void SIGREAD(void *pvParameter)
 {
   while(1)
   {
+    xSemaphoreTake( ValsSemaphore, portMAX_DELAY );
     digitalWrite(TASK3, HIGH); //output to test execution time
     int pulsetime = 0;
     pulsetime = (pulseIn(SIG, HIGH, 2500)) * 2; //uses pulseIn to find length of a single wavelength, includes maximum wait time 2500 if wave is outside of specified frequencies
     if(pulsetime != 0) //prevents divide by zero error
     {
-      SIGFREQ = (1000000 / pulsetime)* 0.96; //calculate frequency and convert to apropriate units, *0.96 to account for predictable inaccuracy found during testing
+      Vals.SignalFrequency = (1000000 / pulsetime)* 0.96; //calculate frequency and convert to apropriate units, *0.96 to account for predictable inaccuracy found during testing
     }
     digitalWrite(TASK3, LOW); //output to test execution time
+    xSemaphoreGive( ValsSemaphore);
     vTaskDelay(500);
   }
 }
@@ -163,6 +177,8 @@ void ERRORCALC(void *pvParameter)
 {
   while(1)
   {
+    int POTvalave;
+    xQueueReceive( xQueue, &POTvalave, portMAX_DELAY);
     if(POTvalave > 2048) //if pot is above half way point, save error_code
     {
       error_code = 1;
@@ -188,14 +204,16 @@ void SERIALPRINT(void *pvParameter)
 {
   while(1)
   {
-    //if(digitalRead(BUTTON) == 0)
-    //{
-      Serial.print(BUTTONSTATE); //serial print required data
+    if(Vals.Button == 0)
+    {
+      xSemaphoreTake( ValsSemaphore, portMAX_DELAY );
+      Serial.print(Vals.Button); //serial print required data
       Serial.print(",");
-      Serial.print(SIGFREQ);
+      Serial.print(Vals.SignalFrequency);
       Serial.print(",");
-      Serial.println(POTvalave);
-    //}
+      Serial.println(Vals.POTAverage);
+      xSemaphoreGive( ValsSemaphore);
+    }
     vTaskDelay(2500);
   }
 }
