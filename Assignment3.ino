@@ -8,15 +8,12 @@ const byte BUTTON = 22;
 const byte ERROR = 18;
 const byte SIG = 17;
 const byte TASK3 = 19;
-volatile int count = 1; //global variables
 volatile int avecount = 0;
 volatile int POTval[4] = {1, 1, 1, 1};
 volatile byte error_code = 0;
-#define configTICK_RATE_HZ 500
 struct SerialVals{byte Button; int SignalFrequency; int POTAverage;};
 SerialVals Vals = {1 , 1 , 1};
 SemaphoreHandle_t ValsSemaphore;
-SemaphoreHandle_t POTSemaphore;
 xQueueHandle  xQueue;
 
 void setup() 
@@ -30,56 +27,18 @@ void setup()
   pinMode(SIG, INPUT);
   pinMode(TASK3, OUTPUT);
   ValsSemaphore = xSemaphoreCreateBinary();
-  POTSemaphore = xSemaphoreCreateBinary();
+  xSemaphoreGive(ValsSemaphore);
   xQueue = xQueueCreate( 1, sizeof(int) );
-  xTaskCreate(&RUNWATCHDOG, "RUNWATCHDOG", 512,NULL,5,NULL ); //task 1
-  xTaskCreate(&BUTTONREAD, "BUTTONREAD", 512,NULL,5,NULL ); //task 2
-  xTaskCreate(&SIGREAD, "SIGREAD", 512,NULL,5,NULL ); //task 3
-  xTaskCreate(&ADC, "ADC", 512,NULL,5,NULL ); //task 4
-  xTaskCreate(&ADCAVE, "ADCAVE", 512,NULL,5,NULL ); //task 5
-  xTaskCreate(&ASM, "ASM", 512,NULL,5,NULL ); //task 6
-  xTaskCreate(&ERRORCALC, "ERRORCALC", 512,NULL,5,NULL ); //task 7
-  xTaskCreate(&ERRORLED, "ERRORLED", 512,NULL,5,NULL ); //task 8
-  xTaskCreate(&SERIALPRINT, "SERIALPRINT", 1024,NULL,5,NULL ); //task 9
+  xTaskCreate(&RUNWATCHDOG, "RUNWATCHDOG", 512,NULL,1,NULL ); //task 1
+  xTaskCreate(&BUTTONREAD, "BUTTONREAD", 512,NULL,1,NULL ); //task 2
+  xTaskCreate(&SIGREAD, "SIGREAD", 1024,NULL,1,NULL ); //task 3
+  xTaskCreate(&ADC, "ADC", 1024,NULL,1,NULL ); //task 4
+  xTaskCreate(&ADCAVE, "ADCAVE", 1024,NULL,1,NULL ); //task 5
+  xTaskCreate(&ASM, "ASM", 512,NULL,1,NULL ); //task 6
+  xTaskCreate(&ERRORCALC, "ERRORCALC", 1024,NULL,1,NULL ); //task 7
+  xTaskCreate(&ERRORLED, "ERRORLED", 512,NULL,1,NULL ); //task 8
+  xTaskCreate(&SERIALPRINT, "SERIALPRINT", 1024,NULL,1,NULL ); //task 9
 }
-
-/*
-
-void TICKER() //run upon triggering ticker
-{
-  count++; //increment count upon ticker triggering
-  if((count % 9) == 0) //the if loops determine the various task frequencies
-  {
-    RUNWATCHDOG(); //run task 1
-  }
-  if((count % 21) == 0)
-  {
-    ADC(); //task 4
-    ADCAVE(); //task 5
-  }
-  if((count % 100) == 0)
-  {
-    BUTTONREAD(); //task 2
-  }
-  if((count % 50) == 0)
-  {
-    ASM(); //task 6
-  }
-  if((count % 500) == 0)
-  {
-    SIGREAD(); //task 3
-  }
-  if((count % 167) == 0)
-  {
-    ERRORCALC(); //task 7
-    ERRORLED(); //task 8
-  }
-  if((count % 2500) == 0)
-  {
-    SERIALPRINT(); //task 9
-  }
-}
-*/
 
 void loop() //holds for unused slot time
 {
@@ -90,10 +49,11 @@ void RUNWATCHDOG(void *pvParameter)
 {
   while(1)
   {
+    //Serial.println("WATCHDOG");
     digitalWrite(WATCHDOG, HIGH); //blink watchdog led
     delayMicroseconds(50);
     digitalWrite(WATCHDOG, LOW);
-    vTaskDelay(250);
+    vTaskDelay(17);
   }
 }
 
@@ -101,13 +61,14 @@ void ADC(void *pvParameter)
 {
   while(1)
   {
+    //Serial.println("ADC");
     POTval[avecount] = analogRead(POT); //read POT, save data to apropriate array slot to memorise last 4 readings
     avecount++;
     if(avecount >= 3) //loop back around if avecount exceeds array size
     {
       avecount = 0;
     }
-    vTaskDelay(21);
+    vTaskDelay(42);
   }
 }
 
@@ -115,6 +76,7 @@ void ADCAVE(void *pvParameter)
 {
   while(1)
   {
+    //Serial.println("ADCAVE");
     int SendVal;
     xQueueSend( xQueue, &SendVal, portMAX_DELAY );
     xSemaphoreTake( ValsSemaphore, portMAX_DELAY );
@@ -127,7 +89,7 @@ void ADCAVE(void *pvParameter)
     Vals.POTAverage = TOT / 4; //find average of readings and save to global variable 
     xQueueOverwrite(xQueue, &SendVal);
     xSemaphoreGive( ValsSemaphore);
-    vTaskDelay(21);
+    vTaskDelay(42);
   }
 } 
 
@@ -135,10 +97,11 @@ void BUTTONREAD(void *pvParameter)
 {
   while(1)
   {
+    //Serial.println("BUTTONREAD");
     xSemaphoreTake( ValsSemaphore, portMAX_DELAY );
     Vals.Button = !digitalRead(BUTTON); //read button
     xSemaphoreGive( ValsSemaphore);
-    vTaskDelay(100);
+    vTaskDelay(200);
   }
 }
 
@@ -146,12 +109,13 @@ void ASM(void *pvParameter)
 {
   while(1)
   {
+    //Serial.println("ASM");
     int i;
     for(i = 0; i < 1000; i++) //run "__asm__ __volatile__ ("nop");" 1000 times
     {
       __asm__ __volatile__ ("nop");
     }
-    vTaskDelay(50);
+    vTaskDelay(100);
   }
 }
 
@@ -159,6 +123,7 @@ void SIGREAD(void *pvParameter)
 {
   while(1)
   {
+    //Serial.println("SIGREAD");
     xSemaphoreTake( ValsSemaphore, portMAX_DELAY );
     digitalWrite(TASK3, HIGH); //output to test execution time
     int pulsetime = 0;
@@ -169,7 +134,7 @@ void SIGREAD(void *pvParameter)
     }
     digitalWrite(TASK3, LOW); //output to test execution time
     xSemaphoreGive( ValsSemaphore);
-    vTaskDelay(500);
+    vTaskDelay(1000);
   }
 }
 
@@ -177,6 +142,7 @@ void ERRORCALC(void *pvParameter)
 {
   while(1)
   {
+    //Serial.println("ERRORCALC");
     int POTvalave;
     xQueueReceive( xQueue, &POTvalave, portMAX_DELAY);
     if(POTvalave > 2048) //if pot is above half way point, save error_code
@@ -187,7 +153,7 @@ void ERRORCALC(void *pvParameter)
     {
       error_code = 0;
     }
-    vTaskDelay(167);
+    vTaskDelay(333);
   }
 }
 
@@ -195,8 +161,9 @@ void ERRORLED(void *pvParameter)
 {
   while(1)
   {
+    //Serial.println("ERRORLED");
     digitalWrite(ERROR, error_code); //set led to show error code
-    vTaskDelay(167);
+    vTaskDelay(333);
   }
 }
 
@@ -204,7 +171,7 @@ void SERIALPRINT(void *pvParameter)
 {
   while(1)
   {
-    if(Vals.Button == 0)
+    if(Vals.Button != 0)
     {
       xSemaphoreTake( ValsSemaphore, portMAX_DELAY );
       Serial.print(Vals.Button); //serial print required data
@@ -214,6 +181,6 @@ void SERIALPRINT(void *pvParameter)
       Serial.println(Vals.POTAverage);
       xSemaphoreGive( ValsSemaphore);
     }
-    vTaskDelay(2500);
+    vTaskDelay(5000);
   }
 }
