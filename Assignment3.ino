@@ -30,7 +30,7 @@ void setup()
   xSemaphoreGive(ValsSemaphore);
   xQueue = xQueueCreate( 1, sizeof(int) );
   xTaskCreate(&RUNWATCHDOG, "RUNWATCHDOG", 512,NULL,1,NULL ); //task 1
-  xTaskCreate(&BUTTONREAD, "BUTTONREAD", 512,NULL,1,NULL ); //task 2
+  xTaskCreate(&BUTTONREAD, "BUTTONREAD", 1024,NULL,1,NULL ); //task 2
   xTaskCreate(&SIGREAD, "SIGREAD", 1024,NULL,1,NULL ); //task 3
   xTaskCreate(&ADC, "ADC", 1024,NULL,1,NULL ); //task 4
   xTaskCreate(&ADCAVE, "ADCAVE", 1024,NULL,1,NULL ); //task 5
@@ -78,7 +78,6 @@ void ADCAVE(void *pvParameter)
   {
     //Serial.println("ADCAVE");
     int SendVal;
-    xQueueSend( xQueue, &SendVal, portMAX_DELAY );
     xSemaphoreTake( ValsSemaphore, portMAX_DELAY );
     int loop;
     int TOT = 0;
@@ -86,7 +85,8 @@ void ADCAVE(void *pvParameter)
     {
         TOT = TOT + POTval[loop];
     }
-    Vals.POTAverage = TOT / 4; //find average of readings and save to global variable 
+    Vals.POTAverage = TOT / 4; //find average of readings and save to global variable
+    SendVal = TOT / 4; 
     xQueueOverwrite(xQueue, &SendVal);
     xSemaphoreGive( ValsSemaphore);
     vTaskDelay(42);
@@ -142,9 +142,8 @@ void ERRORCALC(void *pvParameter)
 {
   while(1)
   {
-    //Serial.println("ERRORCALC");
     int POTvalave;
-    xQueueReceive( xQueue, &POTvalave, portMAX_DELAY);
+    xQueueReceive(xQueue, &POTvalave, portMAX_DELAY);
     if(POTvalave > 2048) //if pot is above half way point, save error_code
     {
       error_code = 1;
